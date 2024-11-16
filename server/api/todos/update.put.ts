@@ -1,21 +1,14 @@
-import {useDatabase} from "nitropack/runtime";
+import {TodoItem} from "~/types/todo";
 
 export default defineEventHandler(async (event) => {
     const db = useDatabase();
-    const { id, isDone } = await readBody(event);
+    const { id, isDone } = await readBody<TodoItem>(event);
 
-    if (!id || isDone === undefined) {
-        throw createError({
-            statusCode: 400,
-            statusMessage: "Invalid data. Both id and isDone are required.",
-        });
-    }
-
-    const isDoneValue = isDone ? 1 : 0;
+    const validIsDone = isDone === 1 ? 1 : 0; // Convert to 1 or 0
 
     await db.sql`
-    UPDATE Todos SET isDone = ${isDoneValue} WHERE id = ${id}
-  `;
+        UPDATE Todos SET isDone = ${validIsDone} WHERE id = ${id}
+    `;
 
     return { ok: true, message: 'Todo updated successfully' };
 });

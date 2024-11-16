@@ -6,8 +6,8 @@ export default defineEventHandler(async () => {
         CREATE TABLE IF NOT EXISTS Todos (
                                              "id" INTEGER PRIMARY KEY AUTOINCREMENT,
                                              "title" TEXT,
-                                             "isDone" BOOLEAN,
-                                             "email" TEXT
+                                             "isDone" INTEGER NOT NULL DEFAULT 0,
+                                             "userId" TEXT
         );
     `;
 

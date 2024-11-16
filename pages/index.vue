@@ -1,34 +1,44 @@
 <script setup lang="ts">
-import {ref} from 'vue';
 
-import {definePageMeta} from '#imports'
 import {GoogleSignInButton, decodeCredential, type CredentialResponse} from "vue3-google-signin";
+import type {TodoItem} from "~/types/todo";
 
-definePageMeta({auth: false})
-
+import {useStorage} from '@vueuse/core';
 
 const title = ref('');
-const isDone = ref(false);
-const email = ref('m.gzegozevskis@gmail.com');
+const isDone = ref(0);
 const successMessage = ref('');
 const errorMessage = ref('');
+const userId = ref('');
+
+
+
+const googleAuthToken = useStorage('google_auth_token', null); // Automatically syncs with localStorage
+const isSignedIn = computed(() => !!googleAuthToken.value); // Reactive sign-in status based on the token
+
 
 const handleSubmit = async () => {
+  if (!userId.value) {
+    errorMessage.value = 'User ID is not available. Please sign in first.';
+    return;
+  }
+
   try {
     const response = await $fetch('/api/todos/create', {
       method: 'POST',
       body: {
         title: title.value,
-        isDone: isDone.value ? 1 : 0, // Convert boolean to SQLite-compatible value
-        email: email.value,
+        isDone: isDone.value,
+        userId: userId.value,
       },
     });
 
     successMessage.value = response.message;
     errorMessage.value = '';
     title.value = '';
-    isDone.value = false;
-    email.value = '';
+    isDone.value = 0;
+
+    await fetchTodos();
   } catch (error) {
     successMessage.value = '';
     errorMessage.value = (error as Error).message;
@@ -36,26 +46,30 @@ const handleSubmit = async () => {
 };
 
 
-const todos = ref([]);
+const todos = ref<TodoItem[]>([]);
 
 const fetchTodos = async () => {
   try {
-    const response = await $fetch(`/api/todos?email=${encodeURIComponent(email.value)}`);
+    const response = await $fetch(`/api/todos?userId=${encodeURIComponent(userId.value)}`);
     todos.value = response.todos;
   } catch (error) {
     errorMessage.value = (error as Error).message;
   }
 };
 
-const updateTodoStatus = async (todo: any) => {
+const updateTodoStatus = async (todo: TodoItem) => {
+
+  todo.isDone = todo.isDone === 1 ? 0 : 1;
+
+
   try {
     const response = await $fetch('/api/todos/update', {
       method: 'PUT',
       headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({
+      body: {
         id: todo.id,
         isDone: todo.isDone,
-      }),
+      }
     });
 
     if (!response || !response.ok) {
@@ -69,88 +83,100 @@ const updateTodoStatus = async (todo: any) => {
     errorMessage.value = (error as Error).message || 'An error occurred while updating the todo status.';
   }
 };
-const handleSignInSuccess = (response: CredentialResponse) => {
+
+
+const handleSignInSuccess = async (response: CredentialResponse) => {
   const {credential} = response;
   const decodedCredential = decodeCredential(credential);
-  console.log("User:", decodedCredential);
+
+  userId.value = decodedCredential.id;
+  googleAuthToken.value = credential; // Automatically stored in localStorage by VueUse
+
+  await fetchTodos();
 };
 
 const handleSignInError = () => {
   console.error("Signin Failed");
 };
 
-onMounted(fetchTodos);
+const handleLogout = () => {
+  googleAuthToken.value = null; // Automatically removes the token from localStorage
+  console.log("User logged out");
+};
+
+
+
+onMounted(() => {
+  if (googleAuthToken.value) {
+    // Token exists, mark as signed in and fetch todos
+    userId.value = decodeCredential(googleAuthToken.value).id;
+    fetchTodos();
+  }
+});
 
 </script>
 
-
 <template>
-  <div>
-    <h2>Create New Todo</h2>
-    <form @submit.prevent="handleSubmit">
-      <div>
-        <label for="title">Title:</label>
-        <input
-            type="text"
-            id="title"
-            v-model="title"
-            placeholder="Enter title"
-            required
-        />
-      </div>
-      <div>
-        <label for="isDone">Is Done:</label>
-        <input type="checkbox" id="isDone" v-model="isDone"/>
-      </div>
-      <div>
-        <label for="email">Email:</label>
-        <input
-            type="email"
-            id="email"
-            v-model="email"
-            placeholder="Enter email"
-            required
-        />
-      </div>
-      <button type="submit">Create Todo</button>
-    </form>
 
-    <p v-if="successMessage" class="success">{{ successMessage }}</p>
-    <p v-if="errorMessage" class="error">{{ errorMessage }}</p>
-  </div>
-
-  <div>
-    <h1>Your Todos</h1>
-
-    <!-- Error message if there's any -->
-    <div v-if="errorMessage" class="error">{{ errorMessage }}</div>
-
-    <!-- Todo list -->
-    <ul v-if="todos.length > 0">
-      <li v-for="todo in todos" :key="todo.id">
-        <!-- Checkbox for marking a todo as done -->
-        <input
-            type="checkbox"
-            v-model="todo.isDone"
-            @change="updateTodoStatus(todo)"
-            :checked="todo.isDone"
-        />
-        <strong>{{ todo.title }}</strong>
-        <span v-if="todo.isDone">✔</span>
-        <span v-else>❌</span>
-      </li>
-    </ul>
-
-    <p v-else>No todos found for this email.</p>
-  </div>
-
-  <div class="center">
+ {{googleAuthToken}}
+  <template v-if="!isSignedIn">
+    <p>YOU NEED TO SIGN IN</p>
     <GoogleSignInButton
         @success="handleSignInSuccess"
         @error="handleSignInError"
     />
-  </div>
+  </template>
+  <template v-else>
+    <div>
+      <h2>Create New Todo</h2>
+      <form @submit.prevent="handleSubmit">
+        <div>
+          <label for="title">Title:</label>
+          <input
+              type="text"
+              id="title"
+              v-model="title"
+              placeholder="Enter title"
+              required
+          />
+        </div>
+        <div>
+          <label for="isDone">Is Done:</label>
+          <input type="checkbox" id="isDone" v-model="isDone"/>
+        </div>
+        <button type="submit">Create Todo</button>
+      </form>
 
+      <p v-if="successMessage" class="success">{{ successMessage }}</p>
+      <p v-if="errorMessage" class="error">{{ errorMessage }}</p>
+    </div>
+
+    <div>
+      <h1>Your Todos</h1>
+      <div v-if="errorMessage" class="error">{{ errorMessage }}</div>
+      <ul v-if="todos.length > 0">
+        <li v-for="todo in todos" :key="todo.id">
+          <!-- Checkbox to toggle the todo status -->
+          <input
+              type="checkbox"
+              :checked="todo.isDone === 1"
+              @change="updateTodoStatus(todo)"
+
+          />
+
+          <strong>{{ todo.title }}</strong>
+
+          <!-- Display status using a check mark or cross -->
+          <span v-if="todo.isDone === 1">✔</span>
+          <span v-else>❌</span>
+        </li>
+      </ul>
+      <p v-else>No todos found.</p>
+    </div>
+
+    <button style="background-color:red;" @click="handleLogout">Logout</button>
+
+  </template>
 
 </template>
 
